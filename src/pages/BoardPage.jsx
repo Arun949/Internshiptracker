@@ -526,7 +526,13 @@ export default function BoardPage() {
 
             // Get public URL
             const { data } = supabase.storage.from('resumes').getPublicUrl(fileName);
-            finalResumeUrl = data.publicUrl;
+            // Ensure data.publicUrl is valid
+            if (data && data.publicUrl) {
+                finalResumeUrl = data.publicUrl;
+            } else {
+                console.error("Could not retrieve public URL:", data);
+                showToast("⚠️ Upload succeeded but couldn't get link");
+            }
         }
 
         const logo = form.company[0].toUpperCase();
