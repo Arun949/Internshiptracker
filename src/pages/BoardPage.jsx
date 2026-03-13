@@ -217,7 +217,7 @@ const COLUMNS = [
     { id: "rejected", label: "Rejected", emoji: "✖", color: "#F43F5E", pastel: "#ffe4e6", text: "#9f1239", border: "#fecdd3" },
 ];
 
-const EMPTY_FORM = { company: "", role: "", location: "", deadline: "", salary: "", notes: "", status: "saved" };
+const EMPTY_FORM = { company: "", role: "", location: "", deadline: "", salary: "", notes: "", status: "saved", resume_url: "", job_link: "" };
 const LOGO_COLORS = ["#635bff", "#3b82f6", "#f59e0b", "#10b981", "#f43f5e", "#ec4899", "#06b6d4", "#84cc16", "#f97316"];
 const logoColor = (n) => LOGO_COLORS[(n?.charCodeAt(0) || 65) % LOGO_COLORS.length];
 
@@ -286,6 +286,20 @@ function Card({ card, col, onEdit, onDelete, onDragStart, dragging }) {
                 {card.salary && <span className="tag" style={{ background: "#f0fdf4", color: "#16a34a", border: "1px solid #bbf7d0" }}>💰 {card.salary}</span>}
                 {card.deadline && <DeadlineBadge deadline={card.deadline} />}
             </div>
+            {(card.resume_url || card.job_link) && (
+                <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+                    {card.resume_url && (
+                        <a href={card.resume_url} target="_blank" rel="noopener noreferrer" className="tag" style={{ background: "#f8fafc", color: "#334155", border: "1px solid #e2e8f0", textDecoration: "none" }} onClick={e => e.stopPropagation()}>
+                            📄 Resume
+                        </a>
+                    )}
+                    {card.job_link && (
+                        <a href={card.job_link} target="_blank" rel="noopener noreferrer" className="tag" style={{ background: "#f8fafc", color: "#334155", border: "1px solid #e2e8f0", textDecoration: "none" }} onClick={e => e.stopPropagation()}>
+                            🔗 Job Link
+                        </a>
+                    )}
+                </div>
+            )}
             {card.deadline && <div style={{ fontSize: 10, color: "#a5b4fc", fontWeight: 600, marginBottom: 5 }}>📅 {formatDate(card.deadline)}</div>}
             {card.notes && (
                 <div style={{ fontSize: 11.5, color: "#6b7280", borderTop: "1px solid #f3f4f6", paddingTop: 7, marginTop: 3, lineHeight: 1.6, fontStyle: "italic" }}>
@@ -296,20 +310,27 @@ function Card({ card, col, onEdit, onDelete, onDragStart, dragging }) {
     );
 }
 
-function FormField({ label, value, onChange, placeholder, type = "text", isTextarea }) {
+function FormField({ label, value, onChange, placeholder, type = "text", isTextarea, accept }) {
     return (
         <div style={{ marginBottom: 14 }}>
             <label className="label">{label}</label>
             {isTextarea
                 ? <textarea className="input-field" value={value} onChange={onChange} placeholder={placeholder} rows={3} style={{ resize: "vertical" }} />
-                : <input className="input-field" type={type} value={value} onChange={onChange} placeholder={placeholder} />
+                : <input className="input-field" type={type} accept={accept} value={value} onChange={onChange} placeholder={placeholder} />
             }
         </div>
     );
 }
 
-function Modal({ form, setForm, onSave, onClose, isEdit, saving }) {
+function Modal({ form, setForm, onSave, onClose, isEdit, saving, setResumeFile }) {
     const f = key => e => setForm(p => ({ ...p, [key]: e.target.value }));
+    
+    const handleFileChange = (e) => {
+        if (e.target.files && e.target.files.length > 0) {
+            setResumeFile(e.target.files[0]);
+        }
+    };
+
     const col = COLUMNS.find(c => c.id === form.status) || COLUMNS[0];
     return (
         <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
@@ -335,6 +356,13 @@ function Modal({ form, setForm, onSave, onClose, isEdit, saving }) {
                     <div style={{ gridColumn: "1/-1" }}><FormField label="Role *" value={form.role} onChange={f("role")} placeholder="e.g. Data Engineer Intern" /></div>
                     <FormField label="Location" value={form.location} onChange={f("location")} placeholder="Paris, France" />
                     <FormField label="Salary / Stipend" value={form.salary} onChange={f("salary")} placeholder="1200€/mo" />
+                    <div style={{ marginBottom: 14 }}>
+                        <label className="label">Upload Resume (PDF/Doc)</label>
+                        <input className="input-field" type="file" accept=".pdf,.doc,.docx" onChange={handleFileChange} style={{ background: "#fff", cursor: "pointer" }} />
+                        {form.resume_url && !isEdit && <div style={{ fontSize: 11, color: "#a5b4fc", marginTop: 4 }}>Using uploaded file</div>}
+                        {isEdit && form.resume_url && <div style={{ fontSize: 11, color: "#a5b4fc", marginTop: 4 }}>Existing file attached. Select new to replace.</div>}
+                    </div>
+                    <FormField label="Job Link" value={form.job_link} onChange={f("job_link")} placeholder="https://linkedin.com/jobs/..." type="url" />
                     <FormField label="Deadline" value={form.deadline} onChange={f("deadline")} type="date" />
                     <div style={{ marginBottom: 14 }}>
                         <label className="label">Status</label>
@@ -399,6 +427,8 @@ export default function BoardPage() {
     const [deleteTarget, setDeleteTarget] = useState(null);
     const [saving, setSaving] = useState(false);
     const [toast, setToast] = useState(null);
+
+    const [resumeFile, setResumeFile] = useState(null);
 
     const styleRef = useRef(null);
 
@@ -467,14 +497,38 @@ export default function BoardPage() {
     const statMap = Object.fromEntries(COLUMNS.map(col => [col.id, cards.filter(c => c.status === col.id).length]));
 
     /* ── Open modal helpers ── */
-    const openAdd = useCallback(() => { setForm(EMPTY_FORM); setEditCard(null); setShowModal(true); }, []);
-    const openEdit = useCallback((card) => { setForm({ ...card, deadline: card.deadline || "" }); setEditCard(card.id); setShowModal(true); }, []);
+    const openAdd = useCallback(() => { setForm(EMPTY_FORM); setEditCard(null); setResumeFile(null); setShowModal(true); }, []);
+    const openEdit = useCallback((card) => { setForm({ ...card, deadline: card.deadline || "" }); setEditCard(card.id); setResumeFile(null); setShowModal(true); }, []);
     const showToast = (msg) => setToast(msg);
 
     /* ── CRUD: Save ── */
     const handleSave = async () => {
         if (!form.company.trim() || !form.role.trim()) return;
         setSaving(true);
+        
+        let finalResumeUrl = form.resume_url;
+
+        // If user selected a new file, upload it
+        if (resumeFile) {
+            const fileExt = resumeFile.name.split('.').pop();
+            const fileName = `${user.id}-${Date.now()}.${fileExt}`;
+            
+            const { error: uploadError, data: uploadData } = await supabase.storage
+                .from('resumes')
+                .upload(fileName, resumeFile, { upsert: true });
+
+            if (uploadError) {
+                console.error("Resume upload error:", uploadError);
+                showToast("❌ Upload Failed: " + uploadError.message);
+                setSaving(false);
+                return;
+            }
+
+            // Get public URL
+            const { data } = supabase.storage.from('resumes').getPublicUrl(fileName);
+            finalResumeUrl = data.publicUrl;
+        }
+
         const logo = form.company[0].toUpperCase();
         const payload = {
             company: form.company.trim(),
@@ -484,6 +538,8 @@ export default function BoardPage() {
             salary: form.salary || null,
             notes: form.notes || null,
             status: form.status,
+            resume_url: finalResumeUrl || null,
+            job_link: form.job_link || null,
             logo,
             user_id: user.id,
         };
@@ -501,6 +557,7 @@ export default function BoardPage() {
             if (!error) showToast("🎉 Application added!");
         }
         setSaving(false);
+        setResumeFile(null);
         setShowModal(false);
     };
 
@@ -685,7 +742,7 @@ export default function BoardPage() {
 
             {/* MODALS */}
             {showModal && (
-                <Modal form={form} setForm={setForm} onSave={handleSave} onClose={() => setShowModal(false)} isEdit={editCard !== null} saving={saving} />
+                <Modal form={form} setForm={setForm} onSave={handleSave} onClose={() => setShowModal(false)} isEdit={editCard !== null} saving={saving} setResumeFile={setResumeFile} />
             )}
             {deleteTarget && (
                 <DeleteConfirm card={deleteTarget} onConfirm={confirmDelete} onCancel={() => setDeleteTarget(null)} saving={saving} />
