@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
+import ReactDOM from "react-dom";
 import { supabase } from "../supabaseClient";
 import { useAuth } from "../AuthContext";
 
@@ -324,15 +325,19 @@ function FormField({ label, value, onChange, placeholder, type = "text", isTexta
 
 function Modal({ form, setForm, onSave, onClose, isEdit, saving, setResumeFile }) {
     const f = key => e => setForm(p => ({ ...p, [key]: e.target.value }));
+    const fileInputRef = useRef(null);
+    const [fileName, setFileName] = useState("");
     
     const handleFileChange = (e) => {
         if (e.target.files && e.target.files.length > 0) {
             setResumeFile(e.target.files[0]);
+            setFileName(e.target.files[0].name);
         }
     };
 
     const col = COLUMNS.find(c => c.id === form.status) || COLUMNS[0];
-    return (
+
+    const modalContent = (
         <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
             <div className="modal-box">
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 22 }}>
@@ -358,9 +363,34 @@ function Modal({ form, setForm, onSave, onClose, isEdit, saving, setResumeFile }
                     <FormField label="Salary / Stipend" value={form.salary} onChange={f("salary")} placeholder="1200€/mo" />
                     <div style={{ marginBottom: 14 }}>
                         <label className="label">Upload Resume (PDF/Doc)</label>
-                        <input className="input-field" type="file" accept=".pdf,.doc,.docx" onChange={handleFileChange} style={{ background: "#fff", cursor: "pointer" }} />
-                        {form.resume_url && !isEdit && <div style={{ fontSize: 11, color: "#a5b4fc", marginTop: 4 }}>Using uploaded file</div>}
-                        {isEdit && form.resume_url && <div style={{ fontSize: 11, color: "#a5b4fc", marginTop: 4 }}>Existing file attached. Select new to replace.</div>}
+                        {/* Hidden native file input — no 'No file chosen' text shown */}
+                        <input
+                            ref={fileInputRef}
+                            type="file"
+                            accept=".pdf,.doc,.docx"
+                            onChange={handleFileChange}
+                            style={{ display: "none" }}
+                        />
+                        <div
+                            onClick={() => fileInputRef.current?.click()}
+                            className="input-field"
+                            style={{
+                                background: "#f8f7ff", cursor: "pointer",
+                                display: "flex", alignItems: "center", gap: 8,
+                                color: fileName ? "#1e1b4b" : "#a5b4fc",
+                                userSelect: "none",
+                            }}
+                        >
+                            <span style={{ fontSize: 14 }}>📎</span>
+                            <span style={{ fontSize: 13 }}>
+                                {fileName || (isEdit && form.resume_url ? "Click to replace resume" : "Choose file (PDF / DOC)")}
+                            </span>
+                        </div>
+                        {!fileName && form.resume_url && (
+                            <div style={{ fontSize: 11, color: "#a5b4fc", marginTop: 4 }}>
+                                {isEdit ? "Existing file attached. Click above to replace." : "Using uploaded file"}
+                            </div>
+                        )}
                     </div>
                     <FormField label="Job Link" value={form.job_link} onChange={f("job_link")} placeholder="https://linkedin.com/jobs/..." type="url" />
                     <FormField label="Deadline" value={form.deadline} onChange={f("deadline")} type="date" />
@@ -381,10 +411,12 @@ function Modal({ form, setForm, onSave, onClose, isEdit, saving, setResumeFile }
             </div>
         </div>
     );
+
+    return ReactDOM.createPortal(modalContent, document.body);
 }
 
 function DeleteConfirm({ card, onConfirm, onCancel, saving }) {
-    return (
+    const content = (
         <div className="delete-overlay">
             <div className="delete-box">
                 <div style={{ fontSize: 38, marginBottom: 12 }}>🗑️</div>
@@ -405,6 +437,7 @@ function DeleteConfirm({ card, onConfirm, onCancel, saving }) {
             </div>
         </div>
     );
+    return ReactDOM.createPortal(content, document.body);
 }
 
 function Toast({ message, onDone }) {
