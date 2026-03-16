@@ -6,7 +6,6 @@ const AuthContext = createContext(null);
 export function AuthProvider({ children }) {
     const [user, setUser] = useState(null);
     const [loading, setLoading] = useState(true);
-
     const [isAdmin, setIsAdmin] = useState(false);
 
     useEffect(() => {
@@ -15,42 +14,36 @@ export function AuthProvider({ children }) {
                 setIsAdmin(false);
                 return;
             }
-            const { data } = await supabase
-                .from('profiles')
-                .select('is_admin')
-                .eq('id', sessionUser.id)
-                .single();
-            
-            setIsAdmin(data?.is_admin || false);
+            try {
+                const { data } = await supabase
+                    .from('profiles')
+                    .select('is_admin')
+                    .eq('id', sessionUser.id)
+                    .single();
+                setIsAdmin(data?.is_admin || false);
+            } catch {
+                setIsAdmin(false);
+            }
         };
 
-        // Get current session on mount
-        supabase.auth.getSession().then(({ data: { session } }) => {
-            const currentUser = session?.user ?? null;
-            setUser(currentUser);
-            fetchProfile(currentUser).finally(() => setLoading(false));
-        });
-
-        // Listen for auth changes (login, logout, token refresh)
+        // Use onAuthStateChange ONLY — it fires INITIAL_SESSION immediately on mount,
+        // which avoids the race condition between getSession() + onAuthStateChange.
         const { data: { subscription } } = supabase.auth.onAuthStateChange(
             async (_event, session) => {
-                try {
-                    const currentUser = session?.user ?? null;
-                    setUser(currentUser);
-                    if (currentUser) {
-                        await fetchProfile(currentUser);
-                    } else {
-                        setIsAdmin(false);
-                    }
-                } catch (error) {
-                    console.error("Auth change error:", error);
-                } finally {
-                    setLoading(false);
-                }
+                const currentUser = session?.user ?? null;
+                setUser(currentUser);
+                await fetchProfile(currentUser);
+                setLoading(false);
             }
         );
 
-        return () => subscription.unsubscribe();
+        // Safety timeout — if Supabase never responds, stop spinning after 5s
+        const timeout = setTimeout(() => setLoading(false), 5000);
+
+        return () => {
+            subscription.unsubscribe();
+            clearTimeout(timeout);
+        };
     }, []);
 
     const signUp = (email, password, name) =>
