@@ -427,6 +427,8 @@ export default function BoardPage({ onOpenAdmin }) {
     const [deleteTarget, setDeleteTarget] = useState(null);
     const [saving, setSaving] = useState(false);
     const [toast, setToast] = useState(null);
+    const [filterStatus, setFilterStatus] = useState(null); // null = show all
+    const [sortBy, setSortBy] = useState("newest"); // "newest" | "deadline" | "company"
 
     const [resumeFile, setResumeFile] = useState(null);
 
@@ -478,23 +480,58 @@ export default function BoardPage({ onOpenAdmin }) {
         return () => supabase.removeChannel(channel);
     }, [user]);
 
-    /* Escape closes modals */
+    /* Keyboard shortcuts */
     useEffect(() => {
-        const fn = e => { if (e.key === "Escape") { setShowModal(false); setDeleteTarget(null); } };
+        const fn = e => {
+            if (e.key === "Escape") { setShowModal(false); setDeleteTarget(null); }
+            // Press 'N' to open Add modal (when not typing in an input)
+            if (e.key === "n" && !e.metaKey && !e.ctrlKey && document.activeElement.tagName !== "INPUT" && document.activeElement.tagName !== "TEXTAREA" && document.activeElement.tagName !== "SELECT") {
+                setForm(EMPTY_FORM); setEditCard(null); setResumeFile(null); setShowModal(true);
+            }
+        };
         window.addEventListener("keydown", fn);
         return () => window.removeEventListener("keydown", fn);
     }, []);
 
+    /* CSV Export */
+    const exportCSV = useCallback(() => {
+        const headers = ["Company", "Role", "Location", "Status", "Deadline", "Salary", "Job Link", "Notes"];
+        const rows = cards.map(c => [
+            c.company, c.role, c.location || "", c.status,
+            c.deadline || "", c.salary || "", c.job_link || "", (c.notes || "").replace(/,/g, " ")
+        ]);
+        const csv = [headers, ...rows].map(r => r.map(v => `"${v}"`).join(",")).join("\n");
+        const blob = new Blob([csv], { type: "text/csv" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a"); a.href = url;
+        a.download = `interntrack-export-${new Date().toISOString().slice(0,10)}.csv`;
+        a.click(); URL.revokeObjectURL(url);
+        showToast("📥 Exported to CSV!");
+    }, [cards]);
+
     /* ── Derived state ── */
-    const filtered = cards.filter(c =>
-        !search ||
+    const sortCards = useCallback((arr) => {
+        if (sortBy === "company") return [...arr].sort((a, b) => a.company.localeCompare(b.company));
+        if (sortBy === "deadline") return [...arr].sort((a, b) => {
+            if (!a.deadline && !b.deadline) return 0;
+            if (!a.deadline) return 1;
+            if (!b.deadline) return -1;
+            return new Date(a.deadline) - new Date(b.deadline);
+        });
+        // newest first (default)
+        return [...arr].sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+    }, [sortBy]);
+
+    const filtered = sortCards(cards.filter(c =>
+        (!search ||
         c.company.toLowerCase().includes(search.toLowerCase()) ||
         c.role.toLowerCase().includes(search.toLowerCase()) ||
-        (c.location || "").toLowerCase().includes(search.toLowerCase())
-    );
+        (c.location || "").toLowerCase().includes(search.toLowerCase()))
+    ));
     const total = cards.length;
     const responseRate = total ? Math.round((cards.filter(c => ["interview", "offer"].includes(c.status)).length / total) * 100) : 0;
     const statMap = Object.fromEntries(COLUMNS.map(col => [col.id, cards.filter(c => c.status === col.id).length]));
+    const visibleColumns = filterStatus ? COLUMNS.filter(c => c.id === filterStatus) : COLUMNS;
 
     /* ── Open modal helpers ── */
     const openAdd = useCallback(() => { setForm(EMPTY_FORM); setEditCard(null); setResumeFile(null); setShowModal(true); }, []);
@@ -624,7 +661,37 @@ export default function BoardPage({ onOpenAdmin }) {
                             </div>
 
                             <input className="search-input" placeholder="🔍  Search company, role or city…" value={search} onChange={e => setSearch(e.target.value)} />
-                            <button className="add-btn" onClick={openAdd}>+ Add</button>
+
+                            {/* Sort selector */}
+                            <select
+                                value={sortBy} onChange={e => setSortBy(e.target.value)}
+                                style={{
+                                    background: "rgba(255,255,255,0.8)", border: "1.5px solid rgba(99,91,255,0.15)",
+                                    borderRadius: 12, padding: "9px 12px", color: "#1e1b4b", fontSize: 13,
+                                    fontFamily: "'Plus Jakarta Sans', sans-serif", outline: "none",
+                                    cursor: "pointer", fontWeight: 600,
+                                }}
+                            >
+                                <option value="newest">🕐 Newest</option>
+                                <option value="deadline">⏰ By Deadline</option>
+                                <option value="company">🔤 By Company</option>
+                            </select>
+
+                            {/* CSV Export */}
+                            <button
+                                onClick={exportCSV}
+                                title="Export to CSV"
+                                style={{
+                                    background: "rgba(255,255,255,0.8)", border: "1.5px solid rgba(99,91,255,0.15)",
+                                    borderRadius: 12, padding: "9px 14px", fontWeight: 600, cursor: "pointer",
+                                    fontFamily: "'Plus Jakarta Sans', sans-serif", fontSize: 13, color: "#6366f1",
+                                    whiteSpace: "nowrap", transition: "background 0.15s",
+                                }}
+                                onMouseEnter={e => e.currentTarget.style.background = "#ede9fe"}
+                                onMouseLeave={e => e.currentTarget.style.background = "rgba(255,255,255,0.8)"}
+                            >📥 Export</button>
+
+                            <button className="add-btn" onClick={openAdd}>+ Add <span style={{opacity:0.7, fontSize:11, fontWeight:500}}>(N)</span></button>
 
                             {isAdmin && (
                                 <button
@@ -660,13 +727,26 @@ export default function BoardPage({ onOpenAdmin }) {
 
                     {/* Stats row */}
                     <div className="stats-row">
-                        {COLUMNS.map(col => (
-                            <div key={col.id} className="stat-pill" style={{ borderColor: `${col.color}20` }}>
+                        {COLUMNS.map(col => {
+                            const active = filterStatus === col.id;
+                            return (
+                            <div
+                                key={col.id} className="stat-pill"
+                                onClick={() => setFilterStatus(active ? null : col.id)}
+                                title={active ? "Click to show all" : `Filter to ${col.label} only`}
+                                style={{
+                                    borderColor: active ? col.color : `${col.color}20`,
+                                    background: active ? col.pastel : "rgba(255,255,255,0.8)",
+                                    cursor: "pointer",
+                                    boxShadow: active ? `0 0 0 2px ${col.color}55, 0 2px 8px ${col.color}22` : undefined,
+                                    transform: active ? "translateY(-2px)" : undefined,
+                                }}
+                            >
                                 <span style={{ width: 24, height: 24, borderRadius: 8, background: col.pastel, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13 }}>{col.emoji}</span>
-                                <span style={{ fontSize: 12, color: "#6b7280", fontWeight: 500 }}>{col.label}</span>
+                                <span style={{ fontSize: 12, color: active ? col.text : "#6b7280", fontWeight: active ? 700 : 500 }}>{col.label}</span>
                                 <span style={{ fontFamily: "'Syne',sans-serif", fontWeight: 800, fontSize: 20, color: col.color }}>{statMap[col.id]}</span>
                             </div>
-                        ))}
+                        );})}
                         <div className="stats-right">
                             <div className="stat-pill" style={{ borderColor: "rgba(16,185,129,0.2)", background: "rgba(16,185,129,0.06)" }}>
                                 <span style={{ fontSize: 16 }}>📊</span>
@@ -697,8 +777,15 @@ export default function BoardPage({ onOpenAdmin }) {
                         ))}
                     </div>
                 ) : (
-                    <div style={{ display: "flex", gap: 14, minWidth: 980 }}>
-                        {COLUMNS.map(col => {
+                    <>
+                    {filterStatus && (
+                        <div style={{ textAlign: "center", marginBottom: 12, fontSize: 13, color: "#6366f1", fontWeight: 600 }}>
+                            Showing <strong>{COLUMNS.find(c => c.id === filterStatus)?.label}</strong> only ·{" "}
+                            <button onClick={() => setFilterStatus(null)} style={{ background: "none", border: "none", color: "#6366f1", cursor: "pointer", fontWeight: 700, textDecoration: "underline", fontSize: 13 }}>Show all</button>
+                        </div>
+                    )}
+                    <div style={{ display: "flex", gap: 14, minWidth: filterStatus ? 400 : 980 }}>
+                        {visibleColumns.map(col => {
                             const colCards = filtered.filter(c => c.status === col.id);
                             const isOver = dragOver === col.id;
                             return (
@@ -734,9 +821,10 @@ export default function BoardPage({ onOpenAdmin }) {
                                             />
                                         ))}
                                         {colCards.length === 0 && (
-                                            <div className="empty-drop" style={{ borderColor: isOver ? col.color : col.border, color: isOver ? col.text : "#c7d2fe", background: isOver ? `${col.color}08` : "transparent" }}>
-                                                <span style={{ fontSize: 20, opacity: 0.5 }}>{col.emoji}</span>
-                                                <span>{isOver ? "Drop here!" : "No applications yet"}</span>
+                                            <div className="empty-drop" style={{ borderColor: isOver ? col.color : col.border, color: isOver ? col.text : "#c7d2fe", background: isOver ? `${col.color}08` : "transparent", minHeight: 120 }}>
+                                                <span style={{ fontSize: 28, opacity: 0.4 }}>{col.emoji}</span>
+                                                <span style={{ fontSize: 12, fontWeight: 600 }}>{isOver ? "Drop here!" : search ? "No matches" : "Nothing here yet"}</span>
+                                                {!search && !isOver && <span style={{ fontSize: 11, opacity: 0.7 }}>+ Add to {col.label}</span>}
                                             </div>
                                         )}
                                     </div>
@@ -753,6 +841,7 @@ export default function BoardPage({ onOpenAdmin }) {
                             );
                         })}
                     </div>
+                    </>
                 )}
             </main>
 
